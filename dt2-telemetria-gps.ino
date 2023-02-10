@@ -1,18 +1,7 @@
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/lilygo-t-sim7000g-esp32-gps-data/
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-  
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*/
-
 #define TINY_GSM_MODEM_SIM7000
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
 
-#include <TinyGsmClient.h>
+#include <TinyGSM.h>
 
 // LilyGO T-SIM7000G Pinout
 #define UART_BAUD   115200
@@ -23,6 +12,23 @@
 
 #define LED_PIN     12
 
+#include "WiFi.h"
+#include "HTTPClient.h"
+
+#include <Wire.h>
+#include <Wire.h>
+
+// Replace with your network credentials
+const char* ssid     = "SSID_REDE";
+const char* password = "SENHA_REDE";
+
+// REPLACE with your Domain name and URL path or IP address with path
+const char* serverName = "http://milhagemufmg.com/post-data.php";
+
+// Keep this API Key value to be compatible with the PHP code provided in the project page. 
+// If you change the apiKeyValue value, the PHP file /post-data.php also needs to have the same key 
+String apiKeyValue = "API_KEY_VALUE";
+
 // Set serial for debug console (to Serial Monitor, default speed 115200)
 #define SerialMon Serial
 // Set serial for AT commands
@@ -31,7 +37,8 @@
 TinyGsm modem(SerialAT);
 
 void setup(){
-  SerialMon.begin(115200);
+  Serial.begin(115200);
+  
   SerialMon.println("Place your board outside to catch satelite signal");
 
   // Set LED OFF
@@ -64,6 +71,19 @@ void setup(){
   String modemInfo = modem.getModemInfo();
   delay(500);
   SerialMon.println("Modem Info: " + modemInfo);
+
+  Serial.println("All done with GPS! Starting HTTP config...");
+  
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting");
+  while(WiFi.status() != WL_CONNECTED) { 
+    delay(500);
+    Serial.println("WL_NOT_CONNECTED");
+  }
+  Serial.println("");
+  Serial.print("Connected to WiFi network with IP Address: ");
+  Serial.println(WiFi.localIP());
+    
 }
 
 void loop(){
@@ -77,11 +97,11 @@ void loop(){
 
   modem.enableGPS();
   
-  delay(15000);
+  delay(125);
   float lat      = 0;
-  float lon      = 0;
+  float lng      = 0;
   float speed    = 0;
-  float alt     = 0;
+  float alt      = 0;
   int   vsat     = 0;
   int   usat     = 0;
   float accuracy = 0;
@@ -91,17 +111,18 @@ void loop(){
   int   hour     = 0;
   int   min      = 0;
   int   sec      = 0;
+  String reading_time = "";
   
   for (int8_t i = 15; i; i--) {
     SerialMon.println("Requesting current GPS/GNSS/GLONASS location");
-    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
+    if (modem.getGPS(&lat, &lng, &speed, &alt, &vsat, &usat, &accuracy,
                      &year, &month, &day, &hour, &min, &sec)) {
-      SerialMon.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lon, 8));
-      SerialMon.println("Speed: " + String(speed) + "\tAltitude: " + String(alt));
-      SerialMon.println("Visible Satellites: " + String(vsat) + "\tUsed Satellites: " + String(usat));
-      SerialMon.println("Accuracy: " + String(accuracy));
+      String reading_time = String(year) + "-" + String(month) + "-" + String(day) + " " + String(hour) + ":" + String(min) + ":" + String(sec);
+      SerialMon.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lng, 8));
       SerialMon.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
       SerialMon.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec));
+      SerialMon.println("Reading_time: " + reading_time);
+      
       break;
     } 
     else {
@@ -109,23 +130,49 @@ void loop(){
       delay(15000L);
     }
   }
-  SerialMon.println("Retrieving GPS/GNSS/GLONASS location again as a string");
-  String gps_raw = modem.getGPSraw();
-  SerialMon.println("GPS/GNSS Based Location String: " + gps_raw);
-  SerialMon.println("Disabling GPS");
-  modem.disableGPS();
 
-  // Set SIM7000G GPIO4 LOW ,turn off GPS power
-  // CMD:AT+SGPIO=0,4,1,0
-  // Only in version 20200415 is there a function to control GPS power
-  modem.sendAT("+SGPIO=0,4,1,0");
-  if (modem.waitResponse(10000L) != 1) {
-    SerialMon.println(" SGPIO=0,4,1,0 false ");
+  //Check WiFi connection status
+  if(WiFi.status()== WL_CONNECTED){
+    WiFiClient client;
+    HTTPClient http;
+    
+    // Your Domain name with URL path or IP address with path
+    http.begin(client, serverName);
+    
+    // Specify content-type header
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    
+    // Prepare your HTTP POST request data
+    String httpRequestData = "api_key=" + apiKeyValue + "&lat=" + String(lat, 8) + "&lng=" + String(lng, 8) + "";
+    Serial.print("httpRequestData: ");
+    Serial.println(httpRequestData);
+
+    // Send HTTP POST request
+    int httpResponseCode = http.POST(httpRequestData);
+    
+    if (httpResponseCode>0) {
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+    }
+    else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+    // Free resources
+    http.end();
+  }
+  else {
+    Serial.println("WiFi Disconnected. Attempting to connect again");
+    WiFi.begin(ssid, password);
+    Serial.println("Connecting");
+    while(WiFi.status() != WL_CONNECTED) { 
+      delay(500);
+      Serial.println("WL_NOT_CONNECTED");
+    }
+    Serial.println("");
+    Serial.print("Connected to WiFi network with IP Address: ");
+    Serial.println(WiFi.localIP());;
+    
   }
 
-  delay(200);
-  // Do nothing forevermore
-  while (true) {
-      modem.maintain();
-  }
 }
