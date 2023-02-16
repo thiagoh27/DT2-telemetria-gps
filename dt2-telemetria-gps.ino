@@ -39,6 +39,21 @@ String apiKeyValue = "API_KEY_VALUE";
 #define SerialAT  Serial1
 
 TinyGsm modem(SerialAT);
+float lat      = 0;
+        float lng      = 0;
+        float speed    = 0;
+        float alt      = 0;
+        int   vsat     = 0;
+        int   usat     = 0;
+        float accuracy = 0;
+        int   year     = 0;
+        int   month    = 0;
+        int   day      = 0;
+        int   hour     = 0;
+        int   min      = 0;
+        int   sec      = 0;
+        String reading_time = "";
+
  
 void TaskEnvioDeDados(void *arg) {
     while(1) {
@@ -121,20 +136,6 @@ void TaskGPS(void *arg) {
         modem.enableGPS();
 
         delay(125);
-        float lat      = 0;
-        float lng      = 0;
-        float speed    = 0;
-        float alt      = 0;
-        int   vsat     = 0;
-        int   usat     = 0;
-        float accuracy = 0;
-        int   year     = 0;
-        int   month    = 0;
-        int   day      = 0;
-        int   hour     = 0;
-        int   min      = 0;
-        int   sec      = 0;
-        String reading_time = "";
 
         for (int8_t i = 15; i; i--) {
           SerialMon.println("Requesting current GPS/GNSS/GLONASS location");
