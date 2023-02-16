@@ -1,3 +1,7 @@
+#include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h> 
+
 #define TINY_GSM_MODEM_SIM7000
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
 
@@ -16,7 +20,7 @@
 #include "HTTPClient.h"
 
 #include <Wire.h>
-#include <Wire.h>
+//#include <Wire.h>
 
 // Replace with your network credentials
 const char* ssid     = "SSID_REDE";
@@ -35,9 +39,143 @@ String apiKeyValue = "API_KEY_VALUE";
 #define SerialAT  Serial1
 
 TinyGsm modem(SerialAT);
+ 
+void TaskEnvioDeDados(void *arg) {
+    while(1) {
+ 
+        Serial.print(__func__);
+        Serial.print(" : ");
+        Serial.print(xTaskGetTickCount());
+        Serial.print(" : ");
+        Serial.print("This loop runs on APP_CPU which id is:");
+        Serial.println(xPortGetCoreID());
+        Serial.println();
+      
+         //Check WiFi connection status
+        if(WiFi.status()== WL_CONNECTED){
+          WiFiClient client;
+          HTTPClient http;
 
+          // Your Domain name with URL path or IP address with path
+          http.begin(client, serverName);
+
+          // Specify content-type header
+          http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+          // Prepare your HTTP POST request data
+          String httpRequestData = "api_key=" + apiKeyValue + "&lat=" + String(lat, 8) + "&lng=" + String(lng, 8) + "";
+          Serial.print("httpRequestData: ");
+          Serial.println(httpRequestData);
+
+          // Send HTTP POST request
+          int httpResponseCode = http.POST(httpRequestData);
+
+          if (httpResponseCode>0) {
+            Serial.print("HTTP Response code: ");
+            Serial.println(httpResponseCode);
+          }
+          else {
+            Serial.print("Error code: ");
+            Serial.println(httpResponseCode);
+          }
+          // Free resources
+          http.end();
+        }
+        else {
+          Serial.println("WiFi Disconnected. Attempting to connect again");
+          WiFi.begin(ssid, password);
+          Serial.println("Connecting");
+          while(WiFi.status() != WL_CONNECTED) { 
+            delay(500);
+            Serial.println("WL_NOT_CONNECTED");
+          }
+          Serial.println("");
+          Serial.print("Connected to WiFi network with IP Address: ");
+          Serial.println(WiFi.localIP());;
+
+        }
+
+        vTaskDelay(100);
+    }
+}
+ 
+void TaskGPS(void *arg) {
+    while(1) {
+ 
+        Serial.print(__func__);
+        Serial.print(" : ");
+        Serial.print(xTaskGetTickCount());
+        Serial.print(" : ");
+        Serial.print("This loop runs on PRO_CPU which id is:");
+        Serial.println(xPortGetCoreID());
+        Serial.println();
+ 
+            // Set SIM7000G GPIO4 HIGH ,turn on GPS power
+        // CMD:AT+SGPIO=0,4,1,1
+        // Only in version 20200415 is there a function to control GPS power
+        modem.sendAT("+SGPIO=0,4,1,1");
+        if (modem.waitResponse(10000L) != 1) {
+          SerialMon.println(" SGPIO=0,4,1,1 false ");
+        }
+
+        modem.enableGPS();
+
+        delay(125);
+        float lat      = 0;
+        float lng      = 0;
+        float speed    = 0;
+        float alt      = 0;
+        int   vsat     = 0;
+        int   usat     = 0;
+        float accuracy = 0;
+        int   year     = 0;
+        int   month    = 0;
+        int   day      = 0;
+        int   hour     = 0;
+        int   min      = 0;
+        int   sec      = 0;
+        String reading_time = "";
+
+        for (int8_t i = 15; i; i--) {
+          SerialMon.println("Requesting current GPS/GNSS/GLONASS location");
+          if (modem.getGPS(&lat, &lng, &speed, &alt, &vsat, &usat, &accuracy,
+                           &year, &month, &day, &hour, &min, &sec)) {
+            String reading_time = String(year) + "-" + String(month) + "-" + String(day) + " " + String(hour) + ":" + String(min) + ":" + String(sec);
+            SerialMon.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lng, 8));
+            SerialMon.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
+            SerialMon.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec));
+            SerialMon.println("Reading_time: " + reading_time);
+
+            break;
+          } 
+          else {
+            SerialMon.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
+            delay(15000L);
+          }
+        }
+        vTaskDelay(100);
+      
+    }
+}
+ 
 void setup(){
-  Serial.begin(115200);
+    Serial.begin(115200);
+ 
+    xTaskCreatePinnedToCore(TaskEnvioDeDados, 
+                        "TaskEnvioDeDadosOnApp", 
+                        2048, 
+                        NULL, 
+                        4, 
+                        NULL,
+                         APP_CPU_NUM);
+    
+    xTaskCreatePinnedToCore(TaskGPS, 
+                        "TaskGPSOnPro", 
+                        2048, 
+                        NULL, 
+                        8, 
+                        NULL, 
+                        PRO_CPU_NUM);
   
   SerialMon.println("Place your board outside to catch satelite signal");
 
@@ -83,96 +221,18 @@ void setup(){
   Serial.println("");
   Serial.print("Connected to WiFi network with IP Address: ");
   Serial.println(WiFi.localIP());
-    
+  
 }
-
+ 
 void loop(){
-  // Set SIM7000G GPIO4 HIGH ,turn on GPS power
-  // CMD:AT+SGPIO=0,4,1,1
-  // Only in version 20200415 is there a function to control GPS power
-  modem.sendAT("+SGPIO=0,4,1,1");
-  if (modem.waitResponse(10000L) != 1) {
-    SerialMon.println(" SGPIO=0,4,1,1 false ");
-  }
-
-  modem.enableGPS();
-  
-  delay(125);
-  float lat      = 0;
-  float lng      = 0;
-  float speed    = 0;
-  float alt      = 0;
-  int   vsat     = 0;
-  int   usat     = 0;
-  float accuracy = 0;
-  int   year     = 0;
-  int   month    = 0;
-  int   day      = 0;
-  int   hour     = 0;
-  int   min      = 0;
-  int   sec      = 0;
-  String reading_time = "";
-  
-  for (int8_t i = 15; i; i--) {
-    SerialMon.println("Requesting current GPS/GNSS/GLONASS location");
-    if (modem.getGPS(&lat, &lng, &speed, &alt, &vsat, &usat, &accuracy,
-                     &year, &month, &day, &hour, &min, &sec)) {
-      String reading_time = String(year) + "-" + String(month) + "-" + String(day) + " " + String(hour) + ":" + String(min) + ":" + String(sec);
-      SerialMon.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lng, 8));
-      SerialMon.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
-      SerialMon.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec));
-      SerialMon.println("Reading_time: " + reading_time);
-      
-      break;
-    } 
-    else {
-      SerialMon.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-      delay(15000L);
-    }
-  }
-
-  //Check WiFi connection status
-  if(WiFi.status()== WL_CONNECTED){
-    WiFiClient client;
-    HTTPClient http;
-    
-    // Your Domain name with URL path or IP address with path
-    http.begin(client, serverName);
-    
-    // Specify content-type header
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    
-    // Prepare your HTTP POST request data
-    String httpRequestData = "api_key=" + apiKeyValue + "&lat=" + String(lat, 8) + "&lng=" + String(lng, 8) + "";
-    Serial.print("httpRequestData: ");
-    Serial.println(httpRequestData);
-
-    // Send HTTP POST request
-    int httpResponseCode = http.POST(httpRequestData);
-    
-    if (httpResponseCode>0) {
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-    }
-    else {
-      Serial.print("Error code: ");
-      Serial.println(httpResponseCode);
-    }
-    // Free resources
-    http.end();
-  }
-  else {
-    Serial.println("WiFi Disconnected. Attempting to connect again");
-    WiFi.begin(ssid, password);
-    Serial.println("Connecting");
-    while(WiFi.status() != WL_CONNECTED) { 
-      delay(500);
-      Serial.println("WL_NOT_CONNECTED");
-    }
-    Serial.println("");
-    Serial.print("Connected to WiFi network with IP Address: ");
-    Serial.println(WiFi.localIP());;
-    
-  }
-
+    Serial.print(__func__);
+    Serial.print(" : ");
+    Serial.print(xTaskGetTickCount());
+    Serial.print(" : ");
+    Serial.print("Arduino loop is running on core:");
+    Serial.println(xPortGetCoreID());
+    Serial.println();
+ 
+    delay(5000);
 }
+
